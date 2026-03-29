@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Wall - Educational Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Andika+Basic&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Andika Basic', sans-serif;
+        }
+
+        body {
+            background-color: #8dd7bf;
+        }
+
+        .word-wall-tile {
+            aspect-ratio: 1;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            overflow: hidden;
+            border-radius: 12px;
+        }
+
+        .word-wall-tile:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .word-wall-tile:active {
+            transform: scale(0.95);
+        }
+
+        .word-wall-tile img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .tile-grid {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            max-width: 1200px;
+            align-items: stretch;
+        }
+
+        @media (min-width: 640px) {
+            .tile-grid {
+                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            }
+        }
+
+        @media (min-width: 1024px) {
+            .tile-grid {
+                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            }
+        }
+
+        .no-images-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            min-height: 140px;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+        }
+
+        .file-input-wrapper input[type="file"] {
+            display: none;
+        }
+
+        .upload-area {
+            border: 3px dashed #fc6238;
+            border-radius: 12px;
+            padding: 32px;
+            text-align: center;
+            transition: all 0.2s ease;
+        }
+
+        .upload-area.dragover {
+            background-color: rgba(252, 98, 56, 0.1);
+            border-color: #fc6238;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 sm:p-6 lg:p-8">
+    <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-5xl sm:text-6xl font-bold text-center mb-2" style="color: #fc6238;">Word Wall</h1>
+            <p class="text-center text-gray-700">An Interactive Educational Game</p>
+        </div>
+
+        <!-- Upload Section -->
+        <div class="mb-8 bg-white p-6 rounded-lg shadow-md">
+            <h2 class="text-2xl font-bold mb-4" style="color: #fc6238;">Load Images and Audio</h2>
+            <p class="text-gray-600 mb-4">
+                Select image files and audio files from your device. Audio files will be matched to images by filename (e.g., cat.jpg will play cat.mp3).
+            </p>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <!-- Image Upload -->
+                <div class="file-input-wrapper">
+                    <input type="file" id="imageInput" accept="image/*" multiple>
+                    <button type="button" onclick="document.getElementById('imageInput').click()" 
+                        class="w-full py-3 px-4 rounded-lg font-bold transition-all" 
+                        style="background-color: #fc6238; color: white;">
+                        📁 Select Images
+                    </button>
+                </div>
+
+                <!-- Audio Upload -->
+                <div class="file-input-wrapper">
+                    <input type="file" id="audioInput" accept="audio/*" multiple>
+                    <button type="button" onclick="document.getElementById('audioInput').click()" 
+                        class="w-full py-3 px-4 rounded-lg font-bold transition-all" 
+                        style="background-color: #fc6238; color: white;">
+                        🔊 Select Audio
+                    </button>
+                </div>
+            </div>
+
+            <div class="p-4 rounded-lg" style="background-color: rgba(252, 98, 56, 0.1); border-left: 4px solid #fc6238;">
+                <p class="text-sm text-gray-700">
+                    <strong>Tip:</strong> Upload up to 25 images and matching audio files. For each image (e.g., "apple.jpg"), 
+                    upload a corresponding audio file with the same name (e.g., "apple.mp3").
+                </p>
+            </div>
+
+            <div id="fileStatus" class="mt-4 text-gray-600"></div>
+
+            <button id="startButton" onclick="initializeGame()" 
+                class="mt-6 w-full py-3 px-4 rounded-lg font-bold text-white transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                style="background-color: #fc6238;" disabled>
+                <span id="startButtonText">Start Game</span>
+            </button>
+        </div>
+
+        <!-- Game Container -->
+        <div id="gameContainer" class="hidden">
+            <button id="resetButton" onclick="resetGame()" 
+                class="mb-6 py-2 px-6 rounded-lg font-bold text-white transition-all hover:shadow-lg"
+                style="background-color: #fc6238;">
+                ↺ Load New Images
+            </button>
+
+            <div id="tilesContainer" class="tile-grid">
+                <!-- Tiles will be generated here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Game State
+        let gameState = {
+            images: {},
+            audioFiles: {},
+            audioContext: null,
+            selectedImageFiles: [],
+            selectedAudioFiles: []
+        };
+
+        // Initialize Audio Context
+        function ensureAudioContext() {
+            if (!gameState.audioContext) {
+                gameState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        // Generate Windows Exception Sound (wa-wa-wa beep)
+        function playDefaultErrorSound() {
+            ensureAudioContext();
+            const ctx = gameState.audioContext;
+            const now = ctx.currentTime;
+            
+            // Create an oscillator for the classic Windows error beep
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            
+            // Frequency pattern for Windows error sound
+            osc.frequency.setValueAtTime(800, now);
+            osc.frequency.setValueAtTime(600, now + 0.1);
+            osc.frequency.setValueAtTime(400, now + 0.2);
+            
+            gain.gain.setValueAtTime(0.3, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+            
+            osc.start(now);
+            osc.stop(now + 0.3);
+        }
+
+        // File Selection Handlers
+        document.getElementById('imageInput').addEventListener('change', function(e) {
+            gameState.selectedImageFiles = Array.from(e.target.files);
+            updateFileStatus();
+        });
+
+        document.getElementById('audioInput').addEventListener('change', function(e) {
+            gameState.selectedAudioFiles = Array.from(e.target.files);
+            updateFileStatus();
+        });
+
+        // Update File Status Display
+        function updateFileStatus() {
+            const imageCount = gameState.selectedImageFiles.length;
+            const audioCount = gameState.selectedAudioFiles.length;
+            const statusDiv = document.getElementById('fileStatus');
+            
+            if (imageCount > 0 || audioCount > 0) {
+                statusDiv.innerHTML = `
+                    <div class="text-sm">
+                        <p class="mb-2">✓ <strong>${imageCount}</strong> image(s) selected</p>
+                        <p>✓ <strong>${audioCount}</strong> audio file(s) selected</p>
+                    </div>
+                `;
+                document.getElementById('startButton').disabled = imageCount === 0;
+            } else {
+                statusDiv.innerHTML = '';
+                document.getElementById('startButton').disabled = true;
+            }
+        }
+
+        // Initialize Game
+        function initializeGame() {
+            const startButton = document.getElementById('startButton');
+            const startButtonText = document.getElementById('startButtonText');
+            
+            startButton.disabled = true;
+            startButtonText.innerHTML = '<span class="loading inline-block"></span> Processing...';
+            
+            // Process images and audio files
+            setTimeout(() => {
+                processFiles();
+                renderGame();
+                startButtonText.textContent = 'Start Game';
+                startButton.disabled = false;
+            }, 100);
+        }
+
+        // Process Files
+        function processFiles() {
+            gameState.images = {};
+            gameState.audioFiles = {};
+
+            // Process images
+            gameState.selectedImageFiles.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const filename = getFilenameWithoutExtension(file.name);
+                    gameState.images[filename] = {
+                        data: e.target.result,
+                        filename: file.name,
+                        found: true
+                    };
+                };
+                reader.readAsDataURL(file);
+            });
+
+            // Process audio files
+            gameState.selectedAudioFiles.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const filename = getFilenameWithoutExtension(file.name);
+                    gameState.audioFiles[filename] = e.target.result;
+                };
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // Get filename without extension
+        function getFilenameWithoutExtension(filename) {
+            return filename.substring(0, filename.lastIndexOf('.')) || filename;
+        }
+
+        // Render Game
+        function renderGame() {
+            const gameContainer = document.getElementById('gameContainer');
+            const uploadSection = gameContainer.previousElementSibling;
+            
+            uploadSection.classList.add('hidden');
+            gameContainer.classList.remove('hidden');
+
+            const tilesContainer = document.getElementById('tilesContainer');
+            tilesContainer.innerHTML = '';
+
+            // Check if we have any images
+            if (Object.keys(gameState.images).length === 0) {
+                tilesContainer.innerHTML = '<div class="no-images-placeholder" style="grid-column: 1/-1;">No image files found!</div>';
+                return;
+            }
+
+            // Limit to 25 images max
+            const imageEntries = Object.entries(gameState.images).slice(0, 25);
+
+            imageEntries.forEach(([filename, imageData]) => {
+                const tile = document.createElement('div');
+                tile.className = 'word-wall-tile bg-white';
+                
+                const img = document.createElement('img');
+                img.src = imageData.data;
+                img.alt = filename;
+                img.onerror = function() {
+                    this.style.display = 'none';
+                };
+                
+                tile.appendChild(img);
+                
+                // Add click handler for audio playback
+                tile.onclick = () => playTileAudio(filename);
+                
+                tilesContainer.appendChild(tile);
+            });
+        }
+
+        // Play Audio for Tile
+        function playTileAudio(filename) {
+            ensureAudioContext();
+            
+            // Check if audio file exists
+            if (gameState.audioFiles[filename]) {
+                const arrayBuffer = gameState.audioFiles[filename];
+                gameState.audioContext.decodeAudioData(
+                    arrayBuffer.slice(0),
+                    function(audioBuffer) {
+                        const source = gameState.audioContext.createBufferSource();
+                        source.buffer = audioBuffer;
+                        source.connect(gameState.audioContext.destination);
+                        source.start(0);
+                    },
+                    function() {
+                        // Fallback to error sound if decoding fails
+                        playDefaultErrorSound();
+                    }
+                );
+            } else {
+                // Play default error sound if audio file not found
+                playDefaultErrorSound();
+            }
+        }
+
+        // Reset Game
+        function resetGame() {
+            const gameContainer = document.getElementById('gameContainer');
+            const uploadSection = gameContainer.previousElementSibling;
+            
+            gameContainer.classList.add('hidden');
+            uploadSection.classList.remove('hidden');
+
+            // Reset file inputs
+            document.getElementById('imageInput').value = '';
+            document.getElementById('audioInput').value = '';
+            document.getElementById('fileStatus').innerHTML = '';
+            
+            gameState.selectedImageFiles = [];
+            gameState.selectedAudioFiles = [];
+            gameState.images = {};
+            gameState.audioFiles = {};
+            
+            document.getElementById('startButton').disabled = true;
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', function() {
+            console.log('Word Wall Game Initialized - Ready for alpha testing');
+        });
+    </script>
+</body>
+</html>
