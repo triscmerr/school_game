@@ -261,42 +261,72 @@
             startButton.disabled = true;
             startButtonText.innerHTML = '<span class="loading inline-block"></span> Processing...';
             
-            // Process images and audio files
-            setTimeout(() => {
-                processFiles();
+            // Process images and audio files asynchronously
+            processFiles().then(() => {
                 renderGame();
                 startButtonText.textContent = 'Start Game';
                 startButton.disabled = false;
-            }, 100);
+            });
         }
 
-        // Process Files
+        // Process Files - Returns a Promise that resolves when all files are loaded
         function processFiles() {
             gameState.images = {};
             gameState.audioFiles = {};
 
-            // Process images
-            gameState.selectedImageFiles.forEach(file => {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const filename = getFilenameWithoutExtension(file.name);
-                    gameState.images[filename] = {
-                        data: e.target.result,
-                        filename: file.name,
-                        found: true
-                    };
-                };
-                reader.readAsDataURL(file);
-            });
+            return new Promise((resolve) => {
+                let imageLoadCount = 0;
+                let audioLoadCount = 0;
+                let totalImageFiles = gameState.selectedImageFiles.length;
+                let totalAudioFiles = gameState.selectedAudioFiles.length;
 
-            // Process audio files
-            gameState.selectedAudioFiles.forEach(file => {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const filename = getFilenameWithoutExtension(file.name);
-                    gameState.audioFiles[filename] = e.target.result;
-                };
-                reader.readAsArrayBuffer(file);
+                // Check if we're done loading
+                function checkComplete() {
+                    if (imageLoadCount === totalImageFiles && audioLoadCount === totalAudioFiles) {
+                        resolve();
+                    }
+                }
+
+                // Process images
+                if (totalImageFiles === 0) {
+                    imageLoadCount = 1; // Mark as complete
+                } else {
+                    gameState.selectedImageFiles.forEach(file => {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const filename = getFilenameWithoutExtension(file.name);
+                            gameState.images[filename] = {
+                                data: e.target.result,
+                                filename: file.name,
+                                found: true
+                            };
+                            imageLoadCount++;
+                            checkComplete();
+                        };
+                        reader.readAsDataURL(file);
+                    });
+                }
+
+                // Process audio files
+                if (totalAudioFiles === 0) {
+                    audioLoadCount = 1; // Mark as complete
+                } else {
+                    gameState.selectedAudioFiles.forEach(file => {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const filename = getFilenameWithoutExtension(file.name);
+                            gameState.audioFiles[filename] = e.target.result;
+                            audioLoadCount++;
+                            checkComplete();
+                        };
+                        reader.readAsArrayBuffer(file);
+                    });
+                }
+
+                // Handle case where no files are selected
+                if (totalImageFiles === 0 && totalAudioFiles === 0) {
+                    resolve();
+                }
             });
         }
 
