@@ -289,7 +289,7 @@
 
                 // Process images
                 if (totalImageFiles === 0) {
-                    imageLoadCount = 1; // Mark as complete
+                    imageLoadCount = 0; // Mark as complete (no files to load)
                 } else {
                     gameState.selectedImageFiles.forEach(file => {
                         const reader = new FileReader();
@@ -309,7 +309,7 @@
 
                 // Process audio files
                 if (totalAudioFiles === 0) {
-                    audioLoadCount = 1; // Mark as complete
+                    audioLoadCount = 0; // Mark as complete (no files to load)
                 } else {
                     gameState.selectedAudioFiles.forEach(file => {
                         const reader = new FileReader();
