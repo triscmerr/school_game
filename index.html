@@ -125,10 +125,20 @@
         <div class="mb-8 bg-white p-6 rounded-lg shadow-md">
             <h2 class="text-2xl font-bold mb-4" style="color: #fc6238;">Load Images and Audio</h2>
             <p class="text-gray-600 mb-4">
-                Select image files and audio files from your device. Audio files will be matched to images by filename (e.g., cat.jpg will play cat.mp3).
+                Select a folder, image files, or audio files from your device. Audio files will be matched to images by filename, or by a saved configuration file.
             </p>
             
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                <!-- Folder Upload -->
+                <div class="file-input-wrapper">
+                    <input type="file" id="directoryInput" webkitdirectory directory multiple>
+                    <button type="button" onclick="document.getElementById('directoryInput').click()" 
+                        class="w-full py-3 px-4 rounded-lg font-bold transition-all" 
+                        style="background-color: #fc6238; color: white;">
+                        Browse Folder
+                    </button>
+                </div>
+
                 <!-- Image Upload -->
                 <div class="file-input-wrapper">
                     <input type="file" id="imageInput" accept="image/*" multiple>
@@ -148,12 +158,12 @@
                         🔊 Select Audio
                     </button>
                 </div>
+
             </div>
 
             <div class="p-4 rounded-lg" style="background-color: rgba(252, 98, 56, 0.1); border-left: 4px solid #fc6238;">
                 <p class="text-sm text-gray-700">
-                    <strong>Tip:</strong> Upload up to 25 images and matching audio files. For each image (e.g., "apple.jpg"), 
-                    upload a corresponding audio file with the same name (e.g., "apple.mp3").
+                    <strong>Tip:</strong> Keep `word-wall-config.json` beside the game and place the named image and audio files in the same folder for automatic loading.
                 </p>
             </div>
 
@@ -192,8 +202,12 @@
             images: {},
             audioFiles: {},
             audioContext: null,
+            availableImageFiles: [],
+            availableAudioFiles: [],
             selectedImageFiles: [],
             selectedAudioFiles: [],
+            audioFileAssignments: new Map(),
+            configItems: [],
             validationMessage: '',
             configStatusMessage: ''
         };
@@ -233,12 +247,16 @@
         }
 
         // File Selection Handlers
+        document.getElementById('directoryInput').addEventListener('change', function(e) {
+            handleDirectorySelection(e.target);
+        });
+
         document.getElementById('imageInput').addEventListener('change', function(e) {
-            handleFileSelection(e.target, 'selectedImageFiles', 'image');
+            handleFileSelection(e.target, 'availableImageFiles', 'image');
         });
 
         document.getElementById('audioInput').addEventListener('change', function(e) {
-            handleFileSelection(e.target, 'selectedAudioFiles', 'audio');
+            handleFileSelection(e.target, 'availableAudioFiles', 'audio');
         });
 
         function handleFileSelection(input, stateKey, fileLabel) {
@@ -254,7 +272,148 @@
                 gameState.validationMessage = '';
             }
 
+            applyCurrentSelection();
             updateFileStatus();
+        }
+
+        function handleDirectorySelection(input) {
+            const files = Array.from(input.files);
+            const imageFiles = files.filter(isImageFile);
+            const audioFiles = files.filter(isAudioFile);
+            const duplicateImageNames = getDuplicateBasenames(imageFiles);
+            const duplicateAudioNames = getDuplicateBasenames(audioFiles);
+            const duplicateMessages = [];
+
+            if (duplicateImageNames.length > 0) {
+                duplicateMessages.push(`Duplicate image filename(s) rejected: ${duplicateImageNames.join(', ')}`);
+            }
+            if (duplicateAudioNames.length > 0) {
+                duplicateMessages.push(`Duplicate audio filename(s) rejected: ${duplicateAudioNames.join(', ')}`);
+            }
+
+            if (duplicateMessages.length > 0) {
+                gameState.availableImageFiles = [];
+                gameState.availableAudioFiles = [];
+                input.value = '';
+                gameState.validationMessage = `${duplicateMessages.join('. ')}. Rename files so each base filename is unique.`;
+            } else {
+                gameState.availableImageFiles = imageFiles;
+                gameState.availableAudioFiles = audioFiles;
+                gameState.validationMessage = '';
+            }
+
+            applyCurrentSelection();
+            updateFileStatus();
+        }
+
+        async function loadDefaultConfiguration() {
+            try {
+                gameState.configStatusMessage = `Checking ${CONFIG_FILENAME} for default files...`;
+                updateFileStatus();
+
+                const configResponse = await fetch(CONFIG_FILENAME, { cache: 'no-store' });
+
+                if (!configResponse.ok) {
+                    gameState.configStatusMessage = '';
+                    updateFileStatus();
+                    return;
+                }
+
+                const config = JSON.parse(await configResponse.text());
+                const items = removeDuplicateConfigItems(normalizeConfigItems(config));
+
+                if (items.length === 0) {
+                    gameState.configStatusMessage = `Found ${CONFIG_FILENAME}, but it does not contain usable image names.`;
+                    updateFileStatus();
+                    return;
+                }
+
+                gameState.configItems = items;
+
+                const result = await loadConfiguredFilesFromAppDirectory(items.slice(0, 25));
+                gameState.availableImageFiles = result.images;
+                gameState.availableAudioFiles = result.audio;
+                applyLoadedConfiguration();
+
+                if (gameState.selectedImageFiles.length === 0) {
+                    gameState.configStatusMessage = `Found ${CONFIG_FILENAME}, but none of the configured image files were found. Browse for a folder or files to start.`;
+                    updateFileStatus();
+                    return;
+                }
+
+                const details = [];
+                if (result.missingImages.length > 0) {
+                    details.push(`Missing image(s): ${result.missingImages.join(', ')}`);
+                }
+                if (result.missingAudio.length > 0) {
+                    details.push(`Missing audio: ${result.missingAudio.join(', ')}`);
+                }
+
+                gameState.configStatusMessage = `Loaded ${gameState.selectedImageFiles.length} default image(s) from ${CONFIG_FILENAME}.${details.length > 0 ? ` ${details.join('. ')}.` : ''}`;
+                updateFileStatus();
+                await processFiles();
+                renderGame();
+            } catch (error) {
+                gameState.configItems = [];
+                gameState.availableImageFiles = [];
+                gameState.availableAudioFiles = [];
+                gameState.selectedImageFiles = [];
+                gameState.selectedAudioFiles = [];
+                gameState.audioFileAssignments = new Map();
+                gameState.configStatusMessage = '';
+                updateFileStatus();
+            }
+        }
+
+        async function loadConfiguredFilesFromAppDirectory(items) {
+            const images = [];
+            const audio = [];
+            const missingImages = [];
+            const missingAudio = [];
+
+            for (const item of items) {
+                const imageFile = await fetchConfiguredFile(item.image);
+
+                if (!imageFile) {
+                    missingImages.push(item.image);
+                    continue;
+                }
+
+                images.push(imageFile);
+
+                if (item.audio) {
+                    const audioFile = await fetchConfiguredFile(item.audio);
+
+                    if (audioFile) {
+                        audio.push(audioFile);
+                    } else {
+                        missingAudio.push(item.audio);
+                    }
+                }
+            }
+
+            return {
+                images,
+                audio,
+                missingImages,
+                missingAudio
+            };
+        }
+
+        async function fetchConfiguredFile(path) {
+            try {
+                const filename = getPathFilename(path);
+                const response = await fetch(encodeURI(filename), { cache: 'no-store' });
+
+                if (!response.ok) {
+                    return null;
+                }
+
+                const blob = await response.blob();
+                return new File([blob], filename, { type: blob.type });
+            } catch (error) {
+                return null;
+            }
         }
 
         function getDuplicateBasenames(files) {
@@ -274,12 +433,101 @@
             return Array.from(duplicates);
         }
 
-        function getMissingAudioBasenames() {
-            const audioNames = new Set(gameState.selectedAudioFiles.map(file => getFilenameWithoutExtension(file.name).toLowerCase()));
+        function isImageFile(file) {
+            return file.type.startsWith('image/') || /\.(apng|avif|gif|jpe?g|png|svg|webp)$/i.test(file.name);
+        }
 
+        function isAudioFile(file) {
+            return file.type.startsWith('audio/') || /\.(aac|aiff?|flac|m4a|mp3|oga|ogg|opus|wav|weba|wma)$/i.test(file.name);
+        }
+
+        function applyCurrentSelection() {
+            if (gameState.configItems.length > 0) {
+                applyLoadedConfiguration();
+            } else {
+                applyManualSelection();
+            }
+        }
+
+        function applyManualSelection() {
+            gameState.selectedImageFiles = gameState.availableImageFiles.slice(0, 25);
+            gameState.audioFileAssignments = new Map();
+
+            const audioByBasename = new Map(gameState.availableAudioFiles.map(file => [
+                getFilenameWithoutExtension(file.name).toLowerCase(),
+                file
+            ]));
+
+            gameState.selectedImageFiles.forEach(file => {
+                const basename = getFilenameWithoutExtension(file.name).toLowerCase();
+                const audioFile = audioByBasename.get(basename);
+
+                if (audioFile) {
+                    gameState.audioFileAssignments.set(getFilenameWithoutExtension(file.name), audioFile);
+                }
+            });
+
+            gameState.selectedAudioFiles = Array.from(new Set(gameState.audioFileAssignments.values()));
+        }
+
+        function applyLoadedConfiguration() {
+            const imageByName = new Map(gameState.availableImageFiles.map(file => [
+                file.name.toLowerCase(),
+                file
+            ]));
+            const audioByName = new Map(gameState.availableAudioFiles.map(file => [
+                file.name.toLowerCase(),
+                file
+            ]));
+            const selectedImages = [];
+            const selectedAudio = new Set();
+            const skipped = [];
+            const missingAudio = [];
+            const assignments = new Map();
+
+            gameState.configItems.slice(0, 25).forEach(item => {
+                const imageFilename = getPathFilename(item.image).toLowerCase();
+                const audioFilename = getPathFilename(item.audio).toLowerCase();
+                const imageFile = imageByName.get(imageFilename);
+
+                if (!imageFile) {
+                    skipped.push(item.image);
+                    return;
+                }
+
+                selectedImages.push(imageFile);
+
+                if (audioFilename) {
+                    const audioFile = audioByName.get(audioFilename);
+
+                    if (audioFile) {
+                        assignments.set(getFilenameWithoutExtension(imageFile.name), audioFile);
+                        selectedAudio.add(audioFile);
+                    } else {
+                        missingAudio.push(item.audio);
+                    }
+                }
+            });
+
+            gameState.selectedImageFiles = selectedImages;
+            gameState.selectedAudioFiles = Array.from(selectedAudio);
+            gameState.audioFileAssignments = assignments;
+
+            const details = [];
+            if (skipped.length > 0) {
+                details.push(`Missing image(s): ${skipped.join(', ')}`);
+            }
+            if (missingAudio.length > 0) {
+                details.push(`Missing audio: ${missingAudio.join(', ')}`);
+            }
+
+            gameState.configStatusMessage = `Loaded configuration with ${selectedImages.length} matching image(s).${details.length > 0 ? ` ${details.join('. ')}.` : ''}`;
+        }
+
+        function getMissingAudioBasenames() {
             return gameState.selectedImageFiles
                 .map(file => getFilenameWithoutExtension(file.name))
-                .filter(filename => !audioNames.has(filename.toLowerCase()));
+                .filter(filename => !gameState.audioFileAssignments.has(filename));
         }
 
         function escapeHtml(value) {
@@ -292,16 +540,18 @@
         function updateFileStatus() {
             const imageCount = gameState.selectedImageFiles.length;
             const audioCount = gameState.selectedAudioFiles.length;
+            const availableImageCount = gameState.availableImageFiles.length;
+            const availableAudioCount = gameState.availableAudioFiles.length;
             const statusDiv = document.getElementById('fileStatus');
             const missingAudio = getMissingAudioBasenames();
             const startButton = document.getElementById('startButton');
             const saveConfigButton = document.getElementById('saveConfigButton');
             
-            if (imageCount > 0 || audioCount > 0) {
+            if (availableImageCount > 0 || availableAudioCount > 0 || gameState.configItems.length > 0) {
                 statusDiv.innerHTML = `
                     <div class="text-sm">
-                        <p class="mb-2">✓ <strong>${imageCount}</strong> image(s) selected</p>
-                        <p>✓ <strong>${audioCount}</strong> audio file(s) selected</p>
+                        <p class="mb-2">✓ <strong>${imageCount}</strong> image(s) ready${availableImageCount !== imageCount ? ` from ${availableImageCount} selected` : ''}</p>
+                        <p>✓ <strong>${audioCount}</strong> audio file(s) matched${availableAudioCount !== audioCount ? ` from ${availableAudioCount} selected` : ''}</p>
                         ${missingAudio.length > 0 ? `<p class="mt-2 text-orange-700"><strong>Warning:</strong> ${missingAudio.length} image(s) do not have matching audio: ${missingAudio.map(escapeHtml).join(', ')}</p>` : ''}
                         ${gameState.validationMessage ? `<p class="mt-2 text-red-700"><strong>Error:</strong> ${escapeHtml(gameState.validationMessage)}</p>` : ''}
                         ${gameState.configStatusMessage ? `<p class="mt-2 text-gray-600">${escapeHtml(gameState.configStatusMessage)}</p>` : ''}
@@ -321,23 +571,7 @@
         }
 
         function saveConfiguration() {
-            const audioByName = new Map(gameState.selectedAudioFiles.map(file => [
-                getFilenameWithoutExtension(file.name).toLowerCase(),
-                file.name
-            ]));
-
-            const items = gameState.selectedImageFiles.slice(0, 25).map(file => {
-                const basename = getFilenameWithoutExtension(file.name).toLowerCase();
-
-                return {
-                    image: file.name,
-                    audio: audioByName.get(basename) || ''
-                };
-            });
-
-            const config = {
-                items
-            };
+            const config = buildConfiguration();
             const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
@@ -348,6 +582,24 @@
             link.click();
             link.remove();
             URL.revokeObjectURL(url);
+            gameState.configStatusMessage = `${CONFIG_FILENAME} downloaded. Keep it beside index.html for automatic loading.`;
+            updateFileStatus();
+        }
+
+        function buildConfiguration() {
+            const items = gameState.selectedImageFiles.slice(0, 25).map(file => {
+                const basename = getFilenameWithoutExtension(file.name);
+                const audioFile = gameState.audioFileAssignments.get(basename);
+
+                return {
+                    image: file.name,
+                    audio: audioFile ? audioFile.name : ''
+                };
+            });
+
+            return {
+                items
+            };
         }
 
         // Initialize Game
@@ -398,8 +650,7 @@
                 };
             }));
 
-            const audioReads = gameState.selectedAudioFiles.map(file => readBlob(file, 'arrayBuffer').then(result => {
-                const filename = getFilenameWithoutExtension(file.name);
+            const audioReads = Array.from(gameState.audioFileAssignments.entries()).map(([filename, file]) => readBlob(file, 'arrayBuffer').then(result => {
                 gameState.audioFiles[filename] = result;
             }));
 
@@ -423,48 +674,12 @@
 
                 if (readMode === 'dataURL') {
                     reader.readAsDataURL(blob);
+                } else if (readMode === 'text') {
+                    reader.readAsText(blob);
                 } else {
                     reader.readAsArrayBuffer(blob);
                 }
             });
-        }
-
-        async function loadStartupConfig() {
-            try {
-                const response = await fetch(CONFIG_FILENAME, { cache: 'no-store' });
-
-                if (!response.ok) {
-                    return;
-                }
-
-                const text = await response.text();
-
-                if (!text.trim()) {
-                    return;
-                }
-
-                const config = JSON.parse(text);
-                const items = normalizeConfigItems(config);
-
-                if (items.length === 0) {
-                    return;
-                }
-
-                const result = await loadConfiguredAssets(items);
-
-                if (Object.keys(gameState.images).length === 0) {
-                    gameState.configStatusMessage = `Found ${CONFIG_FILENAME}, but none of the configured image files could be loaded.`;
-                    updateFileStatus();
-                    return;
-                }
-
-                const skipped = result.skipped.length > 0 ? ` Skipped: ${result.skipped.join(', ')}.` : '';
-                gameState.configStatusMessage = `Loaded ${Object.keys(gameState.images).length} configured image(s) from ${CONFIG_FILENAME}.${skipped}`;
-                renderGame();
-            } catch (error) {
-                gameState.configStatusMessage = '';
-                updateFileStatus();
-            }
         }
 
         function normalizeConfigItems(config) {
@@ -480,38 +695,11 @@
                 .filter(item => item.image);
         }
 
-        async function loadConfiguredAssets(items) {
-            gameState.images = {};
-            gameState.audioFiles = {};
-
-            const skipped = [];
-            const uniqueItems = removeDuplicateConfigItems(items);
-
-            for (const item of uniqueItems.slice(0, 25)) {
-                const imageLoaded = await loadConfiguredImage(item.image);
-
-                if (!imageLoaded) {
-                    skipped.push(item.image);
-                    continue;
-                }
-
-                if (item.audio) {
-                    const audioLoaded = await loadConfiguredAudio(item.audio, item.image);
-
-                    if (!audioLoaded) {
-                        skipped.push(item.audio);
-                    }
-                }
-            }
-
-            return { skipped };
-        }
-
         function removeDuplicateConfigItems(items) {
             const seen = new Set();
 
             return items.filter(item => {
-                const basename = getFilenameWithoutExtension(item.image).toLowerCase();
+                const basename = getFilenameWithoutExtension(getPathFilename(item.image)).toLowerCase();
 
                 if (seen.has(basename)) {
                     return false;
@@ -520,56 +708,6 @@
                 seen.add(basename);
                 return true;
             });
-        }
-
-        async function loadConfiguredImage(path) {
-            const blob = await fetchConfiguredBlob(path);
-
-            if (!blob) {
-                return false;
-            }
-
-            try {
-                const filename = getFilenameWithoutExtension(getPathFilename(path));
-                gameState.images[filename] = {
-                    data: await readBlob(blob, 'dataURL'),
-                    filename: getPathFilename(path),
-                    found: true
-                };
-                return true;
-            } catch (error) {
-                return false;
-            }
-        }
-
-        async function loadConfiguredAudio(path, imagePath) {
-            const blob = await fetchConfiguredBlob(path);
-
-            if (!blob) {
-                return false;
-            }
-
-            try {
-                const filename = getFilenameWithoutExtension(getPathFilename(imagePath));
-                gameState.audioFiles[filename] = await readBlob(blob, 'arrayBuffer');
-                return true;
-            } catch (error) {
-                return false;
-            }
-        }
-
-        async function fetchConfiguredBlob(path) {
-            try {
-                const response = await fetch(path, { cache: 'no-store' });
-
-                if (!response.ok) {
-                    return null;
-                }
-
-                return await response.blob();
-            } catch (error) {
-                return null;
-            }
         }
 
         function getPathFilename(path) {
@@ -656,12 +794,17 @@
             uploadSection.classList.remove('hidden');
 
             // Reset file inputs
+            document.getElementById('directoryInput').value = '';
             document.getElementById('imageInput').value = '';
             document.getElementById('audioInput').value = '';
             document.getElementById('fileStatus').innerHTML = '';
             
+            gameState.availableImageFiles = [];
+            gameState.availableAudioFiles = [];
             gameState.selectedImageFiles = [];
             gameState.selectedAudioFiles = [];
+            gameState.audioFileAssignments = new Map();
+            gameState.configItems = [];
             gameState.images = {};
             gameState.audioFiles = {};
             gameState.validationMessage = '';
@@ -674,7 +817,7 @@
         // Initialize on page load
         window.addEventListener('load', function() {
             console.log('Word Wall Game Initialized - Ready for alpha testing');
-            loadStartupConfig();
+            loadDefaultConfiguration();
         });
     </script>
 </body>
